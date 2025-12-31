@@ -7,28 +7,32 @@ if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
   console.error("❌ EMAIL_USER or EMAIL_PASS not set in environment variables!");
 }
 
+// Create transporter with port 465 (SSL) - works better with Render
 const transporter = nodemailer.createTransport({
   service: "gmail",
   host: "smtp.gmail.com",
-  port: 587,
-  secure: false, // true for 465, false for other ports
+  port: 465,
+  secure: true, // true for 465, false for other ports
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
   },
   tls: {
-    rejectUnauthorized: false,
-    ciphers: 'SSLv3'
+    rejectUnauthorized: false
   },
-  connectionTimeout: 10000, // 10 seconds
-  greetingTimeout: 10000,
-  socketTimeout: 10000
+  connectionTimeout: 60000, // 60 seconds for Render
+  greetingTimeout: 30000,
+  socketTimeout: 60000,
+  pool: true,
+  maxConnections: 1,
+  maxMessages: 3
 });
 
-// Verify transporter configuration
+// Verify transporter configuration (non-blocking, don't fail on startup)
 transporter.verify(function (error, success) {
   if (error) {
-    console.error("❌ Email transporter verification failed:", error);
+    console.warn("⚠️ Email transporter verification failed (will retry on send):", error.message);
+    console.warn("⚠️ This is normal on Render - connection will be established when sending");
   } else {
     console.log("✅ Email server is ready to send messages");
   }
@@ -106,9 +110,11 @@ This message was sent from the SKC Catering website contact form.
       hasPass: !!process.env.EMAIL_PASS,
       userLength: process.env.EMAIL_USER?.length || 0
     });
+    console.log("📧 Using SMTP: smtp.gmail.com:465 (SSL)");
     
-    // Send email with explicit promise handling
-    const info = await Promise.resolve(transporter.sendMail(mailOptions));
+    // Send email - connection will be established here if not already
+    console.log("📧 Establishing SMTP connection and sending email...");
+    const info = await transporter.sendMail(mailOptions);
     
     if (!info || !info.messageId) {
       throw new Error("Email sent but no messageId received");
