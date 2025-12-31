@@ -1,42 +1,22 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import dotenv from "dotenv";
 dotenv.config(); // ✅ load env here
 
+// Initialize Resend client
+const resend = new Resend(process.env.RESEND_API_KEY);
+
 // Validate environment variables
-if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-  console.error("❌ EMAIL_USER or EMAIL_PASS not set in environment variables!");
+if (!process.env.RESEND_API_KEY) {
+  console.error("❌ RESEND_API_KEY not set in environment variables!");
+} else {
+  console.log("✅ Resend API key configured");
 }
 
-// Create transporter with port 465 (SSL) - works better with Render
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true, // true for 465, false for other ports
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  },
-  tls: {
-    rejectUnauthorized: false
-  },
-  connectionTimeout: 60000, // 60 seconds for Render
-  greetingTimeout: 30000,
-  socketTimeout: 60000,
-  pool: true,
-  maxConnections: 1,
-  maxMessages: 3
-});
-
-// Verify transporter configuration (non-blocking, don't fail on startup)
-transporter.verify(function (error, success) {
-  if (error) {
-    console.warn("⚠️ Email transporter verification failed (will retry on send):", error.message);
-    console.warn("⚠️ This is normal on Render - connection will be established when sending");
-  } else {
-    console.log("✅ Email server is ready to send messages");
-  }
-});
+if (!process.env.EMAIL_USER) {
+  console.error("❌ EMAIL_USER not set (needed for 'to' address)!");
+} else {
+  console.log("✅ EMAIL_USER configured:", process.env.EMAIL_USER.substring(0, 3) + "***");
+}
 
 export const sendContactMail = async ({ name, email, phone, subject, message }) => {
   console.log("========================================");
@@ -47,27 +27,28 @@ export const sendContactMail = async ({ name, email, phone, subject, message }) 
   try {
     console.log("📧 Checking environment variables...");
     
+    const resendApiKey = process.env.RESEND_API_KEY;
     const emailUser = process.env.EMAIL_USER;
-    const emailPass = process.env.EMAIL_PASS;
     
+    console.log("📧 RESEND_API_KEY exists:", !!resendApiKey);
     console.log("📧 EMAIL_USER exists:", !!emailUser);
-    console.log("📧 EMAIL_PASS exists:", !!emailPass);
     console.log("📧 EMAIL_USER value:", emailUser ? `${emailUser.substring(0, 3)}***` : "NOT SET");
+    
+    if (!resendApiKey) {
+      console.error("❌ RESEND_API_KEY is not configured!");
+      throw new Error("RESEND_API_KEY not configured");
+    }
     
     if (!emailUser) {
       console.error("❌ EMAIL_USER is not configured!");
       throw new Error("EMAIL_USER not configured");
     }
     
-    if (!emailPass) {
-      console.error("❌ EMAIL_PASS is not configured!");
-      throw new Error("EMAIL_PASS not configured");
-    }
-    
     console.log("✅ Environment variables check passed");
+    console.log("📧 Using Resend API (HTTP - no SMTP blocking issues)");
 
-    const mailOptions = {
-      from: `"Srivatsasa & Koundinya Caterers" <${emailUser}>`,
+    const emailContent = {
+      from: "Srivatsasa & Koundinya Caterers <onboarding@resend.dev>", // Resend default domain
       to: emailUser, // owner receives
       replyTo: email, // Reply goes to customer
       subject: `New Enquiry: ${subject}`,
@@ -105,76 +86,44 @@ This message was sent from the SKC Catering website contact form.
     };
 
     console.log("📧 Sending to:", emailUser);
-    console.log("📧 Email config check:", {
-      hasUser: !!process.env.EMAIL_USER,
-      hasPass: !!process.env.EMAIL_PASS,
-      userLength: process.env.EMAIL_USER?.length || 0
-    });
-    console.log("📧 Using SMTP: smtp.gmail.com:465 (SSL)");
-    
-    // Send email with timeout wrapper
-    console.log("📧 Establishing SMTP connection and sending email...");
     console.log("📧 Start time:", new Date().toISOString());
+    console.log("📧 Sending email via Resend API...");
     
-    // Create a promise with timeout
-    const sendPromise = transporter.sendMail(mailOptions);
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => {
-        reject(new Error("Email send timeout after 30 seconds"));
-      }, 30000); // 30 second timeout
-    });
+    // Send email using Resend
+    const { data, error } = await resend.emails.send(emailContent);
     
-    let info;
-    try {
-      info = await Promise.race([sendPromise, timeoutPromise]);
-      console.log("📧 Email send completed at:", new Date().toISOString());
-    } catch (timeoutError) {
-      console.error("❌ Email send timed out!");
-      throw timeoutError;
+    if (error) {
+      console.error("❌ Resend API error:", error);
+      throw new Error(`Resend API error: ${error.message || JSON.stringify(error)}`);
     }
     
-    console.log("📧 Email send result:", {
-      hasInfo: !!info,
-      hasMessageId: !!info?.messageId,
-      response: info?.response,
-      accepted: info?.accepted,
-      rejected: info?.rejected
-    });
-    
-    if (!info || !info.messageId) {
-      console.error("❌ Email sent but no messageId received!");
-      console.error("❌ Info object:", JSON.stringify(info, null, 2));
-      throw new Error("Email sent but no messageId received");
+    if (!data || !data.id) {
+      console.error("❌ Email sent but no ID received!");
+      console.error("❌ Response data:", JSON.stringify(data, null, 2));
+      throw new Error("Email sent but no ID received from Resend");
     }
     
+    console.log("📧 Email send completed at:", new Date().toISOString());
     console.log("✅✅✅ EMAIL SENT SUCCESSFULLY! ✅✅✅");
-    console.log("✅ Message ID:", info.messageId);
-    console.log("✅ Response:", info.response);
-    console.log("✅ Accepted:", info.accepted);
-    console.log("✅ Rejected:", info.rejected);
+    console.log("✅ Resend Email ID:", data.id);
     
-    return info;
+    // Return in similar format to nodemailer for compatibility
+    return {
+      messageId: data.id,
+      accepted: [emailUser],
+      rejected: [],
+      response: `Resend API success: ${data.id}`
+    };
   } catch (error) {
     console.error("========================================");
     console.error("❌❌❌ EMAIL SENDING FAILED! ❌❌❌");
     console.error("========================================");
     console.error("❌ Error message:", error.message);
-    console.error("❌ Error code:", error.code);
     console.error("❌ Error name:", error.name);
     console.error("❌ Error stack:", error.stack);
     
     if (error.response) {
-      console.error("❌ SMTP Response:", error.response);
-    }
-    if (error.responseCode) {
-      console.error("❌ Response Code:", error.responseCode);
-    }
-    if (error.command) {
-      console.error("❌ Failed command:", error.command);
-    }
-    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED') {
-      console.error("❌❌❌ CONNECTION ERROR - Render may be blocking SMTP ports!");
-      console.error("❌ Consider using Resend, SendGrid, or Mailgun instead of Gmail SMTP");
+      console.error("❌ API Response:", error.response);
     }
     
     console.error("========================================");
