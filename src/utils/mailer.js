@@ -112,15 +112,42 @@ This message was sent from the SKC Catering website contact form.
     });
     console.log("📧 Using SMTP: smtp.gmail.com:465 (SSL)");
     
-    // Send email - connection will be established here if not already
+    // Send email with timeout wrapper
     console.log("📧 Establishing SMTP connection and sending email...");
-    const info = await transporter.sendMail(mailOptions);
+    console.log("📧 Start time:", new Date().toISOString());
+    
+    // Create a promise with timeout
+    const sendPromise = transporter.sendMail(mailOptions);
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error("Email send timeout after 30 seconds"));
+      }, 30000); // 30 second timeout
+    });
+    
+    let info;
+    try {
+      info = await Promise.race([sendPromise, timeoutPromise]);
+      console.log("📧 Email send completed at:", new Date().toISOString());
+    } catch (timeoutError) {
+      console.error("❌ Email send timed out!");
+      throw timeoutError;
+    }
+    
+    console.log("📧 Email send result:", {
+      hasInfo: !!info,
+      hasMessageId: !!info?.messageId,
+      response: info?.response,
+      accepted: info?.accepted,
+      rejected: info?.rejected
+    });
     
     if (!info || !info.messageId) {
+      console.error("❌ Email sent but no messageId received!");
+      console.error("❌ Info object:", JSON.stringify(info, null, 2));
       throw new Error("Email sent but no messageId received");
     }
     
-    console.log("✅ Email sent successfully!");
+    console.log("✅✅✅ EMAIL SENT SUCCESSFULLY! ✅✅✅");
     console.log("✅ Message ID:", info.messageId);
     console.log("✅ Response:", info.response);
     console.log("✅ Accepted:", info.accepted);
@@ -128,15 +155,29 @@ This message was sent from the SKC Catering website contact form.
     
     return info;
   } catch (error) {
-    console.error("❌ Email sending failed!");
+    console.error("========================================");
+    console.error("❌❌❌ EMAIL SENDING FAILED! ❌❌❌");
+    console.error("========================================");
     console.error("❌ Error message:", error.message);
     console.error("❌ Error code:", error.code);
+    console.error("❌ Error name:", error.name);
+    console.error("❌ Error stack:", error.stack);
+    
     if (error.response) {
       console.error("❌ SMTP Response:", error.response);
+    }
+    if (error.responseCode) {
+      console.error("❌ Response Code:", error.responseCode);
     }
     if (error.command) {
       console.error("❌ Failed command:", error.command);
     }
+    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED') {
+      console.error("❌❌❌ CONNECTION ERROR - Render may be blocking SMTP ports!");
+      console.error("❌ Consider using Resend, SendGrid, or Mailgun instead of Gmail SMTP");
+    }
+    
+    console.error("========================================");
     throw error;
   }
 };
