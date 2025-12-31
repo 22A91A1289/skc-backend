@@ -71,8 +71,8 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 export const sendContactMail = async ({ name, email, phone, subject, message }) => {
   return await sgMail.send({
-    to: process.env.EMAIL_USER,
-    from: process.env.EMAIL_USER, // verified sender
+    to: process.env.FROM_EMAIL,
+    from: process.env.FROM_EMAIL, // verified sender
     subject: `New Enquiry: ${subject}`,
     html: `
       <h3>📩 New Contact Enquiry</h3>
