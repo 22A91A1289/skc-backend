@@ -1,22 +1,51 @@
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 dotenv.config(); // ✅ load env here
 
-// Initialize Resend client
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Use SendGrid SMTP instead of Gmail - works better with Render
+// SendGrid allows SMTP connections from cloud platforms
+const transporter = nodemailer.createTransport({
+  host: "smtp.sendgrid.net",
+  port: 587,
+  secure: false, // true for 465, false for other ports
+  auth: {
+    user: "apikey", // SendGrid requires 'apikey' as username
+    pass: process.env.SENDGRID_API_KEY // Your SendGrid API key
+  },
+  tls: {
+    rejectUnauthorized: false
+  },
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 30000
+});
 
-// Validate environment variables
-if (!process.env.RESEND_API_KEY) {
-  console.error("❌ RESEND_API_KEY not set in environment variables!");
-} else {
-  console.log("✅ Resend API key configured");
-}
+// Alternative: If you want to use Gmail, uncomment below and comment SendGrid config
+// const transporter = nodemailer.createTransport({
+//   service: "gmail",
+//   host: "smtp.gmail.com",
+//   port: 587,
+//   secure: false,
+//   auth: {
+//     user: process.env.EMAIL_USER,
+//     pass: process.env.EMAIL_PASS
+//   },
+//   tls: {
+//     rejectUnauthorized: false
+//   },
+//   connectionTimeout: 30000,
+//   greetingTimeout: 30000,
+//   socketTimeout: 30000
+// });
 
-if (!process.env.EMAIL_USER) {
-  console.error("❌ EMAIL_USER not set (needed for 'to' address)!");
-} else {
-  console.log("✅ EMAIL_USER configured:", process.env.EMAIL_USER.substring(0, 3) + "***");
-}
+// Verify transporter configuration (non-blocking)
+transporter.verify(function (error, success) {
+  if (error) {
+    console.warn("⚠️ Email transporter verification failed (will retry on send):", error.message);
+  } else {
+    console.log("✅ Email server is ready to send messages");
+  }
+});
 
 export const sendContactMail = async ({ name, email, phone, subject, message }) => {
   console.log("========================================");
@@ -27,16 +56,21 @@ export const sendContactMail = async ({ name, email, phone, subject, message }) 
   try {
     console.log("📧 Checking environment variables...");
     
-    const resendApiKey = process.env.RESEND_API_KEY;
+    // For SendGrid
+    const sendgridKey = process.env.SENDGRID_API_KEY;
     const emailUser = process.env.EMAIL_USER;
     
-    console.log("📧 RESEND_API_KEY exists:", !!resendApiKey);
+    // For Gmail (if using)
+    // const emailUser = process.env.EMAIL_USER;
+    // const emailPass = process.env.EMAIL_PASS;
+    
+    console.log("📧 SENDGRID_API_KEY exists:", !!sendgridKey);
     console.log("📧 EMAIL_USER exists:", !!emailUser);
     console.log("📧 EMAIL_USER value:", emailUser ? `${emailUser.substring(0, 3)}***` : "NOT SET");
     
-    if (!resendApiKey) {
-      console.error("❌ RESEND_API_KEY is not configured!");
-      throw new Error("RESEND_API_KEY not configured");
+    if (!sendgridKey) {
+      console.error("❌ SENDGRID_API_KEY is not configured!");
+      throw new Error("SENDGRID_API_KEY not configured");
     }
     
     if (!emailUser) {
@@ -45,10 +79,10 @@ export const sendContactMail = async ({ name, email, phone, subject, message }) 
     }
     
     console.log("✅ Environment variables check passed");
-    console.log("📧 Using Resend API (HTTP - no SMTP blocking issues)");
+    console.log("📧 Using SendGrid SMTP (smtp.sendgrid.net:587)");
 
-    const emailContent = {
-      from: "Srivatsasa & Koundinya Caterers <onboarding@resend.dev>", // Resend default domain
+    const mailOptions = {
+      from: `"Srivatsasa & Koundinya Caterers" <${emailUser}>`, // Your verified email in SendGrid
       to: emailUser, // owner receives
       replyTo: email, // Reply goes to customer
       subject: `New Enquiry: ${subject}`,
@@ -87,43 +121,50 @@ This message was sent from the SKC Catering website contact form.
 
     console.log("📧 Sending to:", emailUser);
     console.log("📧 Start time:", new Date().toISOString());
-    console.log("📧 Sending email via Resend API...");
+    console.log("📧 Establishing SMTP connection and sending email...");
     
-    // Send email using Resend
-    const { data, error } = await resend.emails.send(emailContent);
+    // Send email with timeout
+    const sendPromise = transporter.sendMail(mailOptions);
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error("Email send timeout after 25 seconds"));
+      }, 25000);
+    });
     
-    if (error) {
-      console.error("❌ Resend API error:", error);
-      throw new Error(`Resend API error: ${error.message || JSON.stringify(error)}`);
+    let info;
+    try {
+      info = await Promise.race([sendPromise, timeoutPromise]);
+      console.log("📧 Email send completed at:", new Date().toISOString());
+    } catch (timeoutError) {
+      console.error("❌ Email send timed out!");
+      throw timeoutError;
     }
     
-    if (!data || !data.id) {
-      console.error("❌ Email sent but no ID received!");
-      console.error("❌ Response data:", JSON.stringify(data, null, 2));
-      throw new Error("Email sent but no ID received from Resend");
+    if (!info || !info.messageId) {
+      console.error("❌ Email sent but no messageId received!");
+      throw new Error("Email sent but no messageId received");
     }
     
-    console.log("📧 Email send completed at:", new Date().toISOString());
     console.log("✅✅✅ EMAIL SENT SUCCESSFULLY! ✅✅✅");
-    console.log("✅ Resend Email ID:", data.id);
+    console.log("✅ Message ID:", info.messageId);
+    console.log("✅ Response:", info.response);
+    console.log("✅ Accepted:", info.accepted);
+    console.log("✅ Rejected:", info.rejected);
     
-    // Return in similar format to nodemailer for compatibility
-    return {
-      messageId: data.id,
-      accepted: [emailUser],
-      rejected: [],
-      response: `Resend API success: ${data.id}`
-    };
+    return info;
   } catch (error) {
     console.error("========================================");
     console.error("❌❌❌ EMAIL SENDING FAILED! ❌❌❌");
     console.error("========================================");
     console.error("❌ Error message:", error.message);
+    console.error("❌ Error code:", error.code);
     console.error("❌ Error name:", error.name);
-    console.error("❌ Error stack:", error.stack);
     
     if (error.response) {
-      console.error("❌ API Response:", error.response);
+      console.error("❌ SMTP Response:", error.response);
+    }
+    if (error.command) {
+      console.error("❌ Failed command:", error.command);
     }
     
     console.error("========================================");
