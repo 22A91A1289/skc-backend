@@ -23,4 +23,7 @@ const menuCategorySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes for better query performance
+menuCategorySchema.index({ active: 1, order: 1 });
+
 export default mongoose.model("MenuCategory", menuCategorySchema);

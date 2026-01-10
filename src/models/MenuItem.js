@@ -63,4 +63,8 @@ const menuItemSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes for better query performance
+menuItemSchema.index({ categoryId: 1, active: 1 });
+menuItemSchema.index({ active: 1 });
+
 export default mongoose.model("MenuItem", menuItemSchema);

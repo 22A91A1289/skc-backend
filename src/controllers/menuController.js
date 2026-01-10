@@ -52,24 +52,36 @@ import MenuMeta from "../models/MenuMeta.js";
 
 /**
  * GET /api/menu
- * Categories + items
+ * Categories + items (Optimized)
  */
 export const getMenu = async (req, res) => {
   try {
-    const categories = await MenuCategory.find({ active: true })
-      .sort({ order: 1 })
-      .lean();
-
-    const items = await MenuItem.find({ active: true }).lean();
-
-    const menu = categories.map((cat) => ({
-      _id: cat._id,
-      name: cat.name,
-      image: cat.image || null,
-      items: items.filter(
-        (item) => item.categoryId.toString() === cat._id.toString()
-      ),
-    }));
+    // Use aggregation for better performance
+    const itemCollectionName = MenuItem.collection.name;
+    const menu = await MenuCategory.aggregate([
+      { $match: { active: true } },
+      { $sort: { order: 1 } },
+      {
+        $lookup: {
+          from: itemCollectionName,
+          localField: "_id",
+          foreignField: "categoryId",
+          as: "items",
+          pipeline: [
+            { $match: { active: true } },
+            { $project: { _id: 1, name: 1, image: 1, isVeg: 1 } }
+          ]
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          name: 1,
+          image: { $ifNull: ["$image", null] },
+          items: 1
+        }
+      }
+    ]);
 
     res.json(menu);
   } catch (err) {

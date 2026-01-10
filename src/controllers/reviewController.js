@@ -19,12 +19,14 @@ export const createReview = async (req, res) => {
 
 /**
  * GET /api/reviews
- * Frontend – only approved reviews
+ * Frontend – only approved reviews (Optimized)
  */
 export const getApprovedReviews = async (req, res) => {
   try {
     const reviews = await Review.find({ approved: true })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(50) // Limit to 50 reviews for better performance
+      .lean(); // Use lean() for faster queries
 
     res.json(reviews);
   } catch (error) {
